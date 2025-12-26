@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UTF-8 Converter</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="container">
+    <nav class="breadcrumb">
+        <a href="../index.html">Kit</a><span>/</span>UTF-8 Converter
+    </nav>
+
+    <header>
+        <h1>UTF-8 Converter</h1>
+        <p class="description">Convert legacy text encodings to Unicode UTF-8.</p>
+    </header>
+
+    <main>
+        <div class="upload-area" id="dropZone">
+            <p><strong>Click to upload or drag & drop file here</strong></p>
+            <p class="hint">Individual text files only (.txt, .srt, .vtt, etc.)</p>
+            <input type="file" id="fileInput" style="display: none;">
+        </div>
+
+        <div id="statusMessage" class="status-msg"></div>
+        <button id="downloadBtn">Download Fixed File</button>
+
+        <article class="guide-content">
+            <h2>About this tool</h2>
+            <p>This tool runs entirely in your browser. No files are uploaded to any server, ensuring 100% privacy and offline capability.</p>
+            
+            <h2>Limitations</h2>
+            <p>Currently, this tool supports <strong>single file</strong> processing. Zip archives or multiple file uploads are not supported. The maximum file size allowed is <strong>10MB</strong>.</p>
+
+            <h2>Why use it?</h2>
+            <p>Old files using local encodings like GBK often appear as "Mojibake" (unreadable characters). This tool re-encodes them into standard UTF-8 for modern devices.</p>
+        </article>
+    </main>
+
+    <footer>
+        <p>© 2025 lu7ue • Tools Collection</p>
+    </footer>
+</div>
+
+<script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const statusMessage = document.getElementById('statusMessage');
+
+    const ALLOWED_EXTENSIONS = ['.txt', '.srt', '.vtt', '.csv', '.log', '.md'];
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+    let processedBlob = null;
+    let originalName = "";
+    let downloadUrl = "";
+
+    downloadBtn.style.display = 'none';
+
+    ['dragenter', 'dragover'].forEach(n => {
+        dropZone.addEventListener(n, (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    });
+    ['dragleave', 'drop'].forEach(n => {
+        dropZone.addEventListener(n, (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); });
+    });
+
+    dropZone.onclick = () => fileInput.click();
+    fileInput.onchange = (e) => handleFile(e.target.files[0]);
+    dropZone.ondrop = (e) => handleFile(e.dataTransfer.files[0]);
+
+    function showStatus(text, isError = false) {
+        statusMessage.innerText = text;
+        statusMessage.className = isError ? 'status-msg status-error' : 'status-msg status-info';
+        statusMessage.style.display = 'block';
+        if (isError) downloadBtn.style.display = 'none';
+    }
+
+    function humanSize(bytes) {
+        if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
+        const units = ["B", "KB", "MB", "GB"];
+        let i = 0;
+        let n = bytes;
+        while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+        return `${n.toFixed(i === 0 ? 0 : 2)} ${units[i]}`;
+    }
+
+    function supportedDecoder(label, opts) {
+        try { return new TextDecoder(label, opts); } catch (_) { return null; }
+    }
+
+    function hasUtf8Bom(u8) {
+        return u8 && u8.length >= 3 && u8[0] === 0xEF && u8[1] === 0xBB && u8[2] === 0xBF;
+    }
+
+    function scoreText(s) {
+        const len = s.length || 1;
+        let rep = 0;
+        let ctrl = 0;
+        let nul = 0;
+        for (let i = 0; i < s.length; i++) {
+            const c = s.charCodeAt(i);
+            if (c === 0xFFFD) rep++;
+            if (c === 0x0000) nul++;
+            if (c < 0x20 && c !== 0x09 && c !== 0x0A && c !== 0x0D) ctrl++;
+        }
+        const repRate = rep / len;
+        const ctrlRate = ctrl / len;
+        const nulRate = nul / len;
+        const weird = repRate * 3 + ctrlRate * 2 + nulRate * 5;
+        return { weird, rep, ctrl, nul, len: s.length };
+    }
+
+    function bestDecode(buffer) {
+        const u8 = new Uint8Array(buffer);
+        if (hasUtf8Bom(u8)) {
+            const dec = supportedDecoder('utf-8', { fatal: false });
+            const text = dec.decode(buffer);
+            return { encoding: 'utf-8 (BOM)', text, score: scoreText(text), reliable: true };
+        }
+
+        const candidates = [];
+        const utf8Fatal = supportedDecoder('utf-8', { fatal: true });
+        if (utf8Fatal) {
+            try {
+                const t = utf8Fatal.decode(buffer);
+                candidates.push({ encoding: 'utf-8', text: t, score: scoreText(t), reliable: true });
+            } catch (_) {}
+        }
+
+        const labels = ['gb18030', 'gbk', 'big5', 'shift_jis', 'euc-kr', 'windows-1252', 'iso-8859-1'];
+        for (const label of labels) {
+            const dec = supportedDecoder(label, { fatal: false });
+            if (!dec) continue;
+            const t = dec.decode(buffer);
+            const sc = scoreText(t);
+            candidates.push({ encoding: label, text: t, score: sc, reliable: false });
+        }
+
+        if (candidates.length === 0) return null;
+
+        candidates.sort((a, b) => a.score.weird - b.score.weird);
+        const best = candidates[0];
+
+        const threshold = 0.06;
+        const ok = best.score.weird <= threshold && best.score.nul === 0;
+
+        return { encoding: best.encoding, text: best.text, score: best.score, reliable: best.reliable || ok };
+    }
+
+    function resetDownload() {
+        processedBlob = null;
+        if (downloadUrl) {
+            try { URL.revokeObjectURL(downloadUrl); } catch (_) {}
+            downloadUrl = "";
+        }
+        downloadBtn.style.display = 'none';
+    }
+
+    function validateFile(file) {
+        if (!file) return { ok: false, msg: "No file selected." };
+        if (file.size === 0) return { ok: false, msg: "Empty file." };
+        if (file.size > MAX_FILE_SIZE) return { ok: false, msg: "File is too large. Max limit is 10MB." };
+
+        const name = (file.name || "").toLowerCase();
+        const isAllowed = ALLOWED_EXTENSIONS.some(ext => name.endsWith(ext));
+        if (!isAllowed) return { ok: false, msg: "Invalid file type. Please upload a text or subtitle file." };
+
+        const mime = (file.type || "").toLowerCase();
+        if (mime && !(mime.startsWith("text/") || mime === "application/octet-stream")) {
+            return { ok: false, msg: "Invalid file format. Please upload a plain text-based file." };
+        }
+
+        return { ok: true, msg: "" };
+    }
+
+    function handleFile(file) {
+        resetDownload();
+        const v = validateFile(file);
+        if (!v.ok) {
+            showStatus(v.msg, true);
+            return;
+        }
+
+        originalName = file.name;
+        showStatus(`Reading "${originalName}" (${humanSize(file.size)})...`);
+
+        const reader = new FileReader();
+
+        reader.onload = (e) => {
+            try {
+                const buffer = e.target.result;
+                const result = bestDecode(buffer);
+
+                if (!result) {
+                    showStatus("Your browser cannot decode this file (no supported encodings).", true);
+                    return;
+                }
+
+                const s = result.score;
+                if (s.nul > 0) {
+                    showStatus("The file content seems incompatible with text conversion (contains NUL bytes).", true);
+                    return;
+                }
+
+                if (s.weird > 0.2) {
+                    showStatus("Conversion failed: decoding result looks corrupted. Try another file or encoding source.", true);
+                    return;
+                }
+
+                processedBlob = new Blob([result.text], { type: 'text/plain;charset=utf-8' });
+
+                const reliability = result.reliable ? "high" : "best-effort";
+                const repInfo = s.rep ? `, replacements: ${s.rep}` : "";
+                showStatus(`Success! Detected: ${result.encoding} (${reliability})${repInfo}. Ready to download "${originalName}".`);
+
+                downloadBtn.style.display = 'block';
+            } catch (_) {
+                showStatus("Error processing file.", true);
+            }
+        };
+
+        reader.onerror = () => showStatus("Error reading file.", true);
+        reader.readAsArrayBuffer(file);
+    }
+
+    downloadBtn.onclick = () => {
+        if (!processedBlob) {
+            showStatus("No processed file available.", true);
+            return;
+        }
+        if (downloadUrl) {
+            try { URL.revokeObjectURL(downloadUrl); } catch (_) {}
+            downloadUrl = "";
+        }
+        downloadUrl = URL.createObjectURL(processedBlob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `[UTF8]_${originalName}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => { if (downloadUrl) { try { URL.revokeObjectURL(downloadUrl); } catch (_) {} downloadUrl = ""; } }, 30000);
+    };
+</script>
+</body>
+</html>
