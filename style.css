@@ -1,0 +1,66 @@
+:root {
+    --bg: #f8f9fa;
+    --text: #333;
+    --card-bg: #ffffff;
+    --accent: #007bff;
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background-color: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    margin: 0;
+    padding: 40px 20px;
+}
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+header {
+    margin-bottom: 40px;
+    text-align: center;
+}
+h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    letter-spacing: -1px;
+}
+.description {
+    color: #666;
+    font-size: 1.1rem;
+}
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+}
+.card {
+    background: var(--card-bg);
+    border: 1px solid #eaeaea;
+    border-radius: 12px;
+    padding: 24px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+.card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.05);
+}
+.card h3 {
+    margin: 0 0 10px 0;
+    color: var(--accent);
+}
+.card p {
+    margin: 0;
+    font-size: 0.95rem;
+    color: #555;
+}
+footer {
+    margin-top: 60px;
+    text-align: center;
+    font-size: 0.9rem;
+    color: #999;
+}
